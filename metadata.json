@@ -1,0 +1,6 @@
+{
+  "name": "Firebase Todo Master",
+  "description": "A secure, real-time Todo application featuring Firebase Authentication and Firestore database management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitive Definition
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Peer 2: Validation Blueprint
+    function isValidTodo(data) {
+      return data.keys().hasAll(['text', 'completed', 'userId', 'createdAt', 'updatedAt'])
+        && data.keys().size() == 5
+        && data.text is string && data.text.size() > 0 && data.text.size() <= 1000
+        && data.completed is bool
+        && data.userId == request.auth.uid
+        && data.userId is string
+        && (data.createdAt == request.time || data.createdAt is timestamp) // Handle existing data
+        && data.updatedAt == request.time;
+    }
+
+    // User profiles (optional but good to secure)
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow write: if isOwner(userId)
+        && incoming().keys().hasAll(['displayName', 'email'])
+        && incoming().email == request.auth.token.email;
+    }
+
+    // Todos Collection
+    match /todos/{todoId} {
+      // Rule 3: Path variable hardening
+      allow get: if isSignedIn() && isValidId(todoId) && isOwner(existing().userId);
+      
+      // Rule 8: Secure List Queries
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn()
+        && isValidId(todoId)
+        && isValidTodo(incoming())
+        && incoming().createdAt == request.time;
+
+      allow update: if isSignedIn()
+        && isValidId(todoId)
+        && isOwner(existing().userId)
+        && isValidTodo(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && (
+          // Action: Toggle completion
+          (incoming().diff(existing()).affectedKeys().hasOnly(['completed', 'updatedAt'])) ||
+          // Action: Edit text
+          (incoming().diff(existing()).affectedKeys().hasOnly(['text', 'updatedAt']))
+        );
+
+      allow delete: if isSignedIn() && isValidId(todoId) && isOwner(existing().userId);
+    }
+  }
+}
